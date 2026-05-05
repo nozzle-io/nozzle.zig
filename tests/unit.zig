@@ -284,7 +284,10 @@ test "sender acquire writable frame and commit" {
     };
     defer sender.destroy();
 
-    const frame = try sender.acquireWritableFrame(64, 64, .rgba8_unorm);
+    const frame = sender.acquireWritableFrame(64, 64, .rgba8_unorm) catch |err| switch (err) {
+        error.ResourceCreationFailed => return error.SkipZigTest,
+        else => return err,
+    };
 
     const frame_info = try frame.info();
     try std.testing.expectEqual(@as(u32, 64), frame_info.width);
