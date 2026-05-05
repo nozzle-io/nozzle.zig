@@ -108,6 +108,21 @@ pub const TextureOrigin = enum(c.NozzleTextureOrigin) {
     bottom_left = c.NOZZLE_ORIGIN_BOTTOM_LEFT,
 };
 
+pub const FormatSource = enum(c.NozzleFormatSource) {
+    unknown = c.NOZZLE_FORMAT_SOURCE_UNKNOWN,
+    requested = c.NOZZLE_FORMAT_SOURCE_REQUESTED,
+    caller_hint = c.NOZZLE_FORMAT_SOURCE_CALLER_HINT,
+    native_observed = c.NOZZLE_FORMAT_SOURCE_NATIVE_OBSERVED,
+};
+
+pub const NativeFormatKind = enum(c.NozzleNativeFormatKind) {
+    unknown = c.NOZZLE_NATIVE_KIND_UNKNOWN,
+    mtl_pixel_format = c.NOZZLE_NATIVE_KIND_MTL_PIXEL_FORMAT,
+    dxgi_format = c.NOZZLE_NATIVE_KIND_DXGI_FORMAT,
+    drm_fourcc = c.NOZZLE_NATIVE_KIND_DRM_FOURCC,
+    gl_internal_format = c.NOZZLE_NATIVE_KIND_GL_INTERNAL_FORMAT,
+};
+
 pub const SenderDesc = struct {
     name: [:0]const u8,
     application_name: [:0]const u8,
@@ -154,9 +169,23 @@ pub const FrameInfo = struct {
     dropped_frame_count: u32,
 };
 
+pub const ResolvedTextureFormat = struct {
+    storage_format: TextureFormat,
+    semantic_format: TextureFormat,
+    format_source: FormatSource,
+    native_backend: BackendType,
+    native_kind: NativeFormatKind,
+    native_value: u32,
+    channel_order: u32,
+    component_type: u32,
+    component_bits: u8,
+    channel_count: u8,
+    bytes_per_pixel: u8,
+};
+
 pub const MappedPixels = struct {
     data: [*]u8,
-    row_stride_bytes: i64,
+    row_stride_bytes: u64,
     width: u32,
     height: u32,
     format: TextureFormat,
@@ -164,17 +193,46 @@ pub const MappedPixels = struct {
 
     pub fn row(self: MappedPixels, y: u32) ?[]u8 {
         if (y >= self.height) return null;
-        const start = @as(usize, @intCast(y)) * @as(usize, @intCast(self.row_stride_bytes));
-        const end = start + @as(usize, @intCast(self.row_stride_bytes));
+        const start = @as(usize, y) * @as(usize, self.row_stride_bytes);
+        const end = start + @as(usize, self.row_stride_bytes);
         return self.data[start..end];
     }
 
     pub fn totalBytes(self: MappedPixels) usize {
-        return @as(usize, @intCast(self.height)) * @as(usize, @intCast(self.row_stride_bytes));
+        return @as(usize, self.height) * @as(usize, self.row_stride_bytes);
     }
 
     pub fn asSlice(self: MappedPixels) []u8 {
         return self.data[0..self.totalBytes()];
+    }
+};
+
+pub const TextureWrapDesc = struct {
+    native_texture: ?*anyopaque,
+    width: u32,
+    height: u32,
+    format: TextureFormat,
+    backend: BackendType,
+};
+
+pub const Texture = struct {
+    raw: *c.NozzleTexture,
+
+    pub fn wrap(desc: TextureWrapDesc) Error!Texture {
+        const c_desc = c.NozzleTextureWrapDesc{
+            .native_texture = desc.native_texture,
+            .width = desc.width,
+            .height = desc.height,
+            .format = @intFromEnum(desc.format),
+            .backend = @intFromEnum(desc.backend),
+        };
+        var raw: ?*c.NozzleTexture = null;
+        try checkCode(c.nozzle_texture_wrap(&c_desc, &raw));
+        return Texture{ .raw = raw.? };
+    }
+
+    pub fn destroy(self: Texture) void {
+        c.nozzle_texture_destroy(self.raw);
     }
 };
 
@@ -205,6 +263,14 @@ pub const Sender = struct {
 
     pub fn commitFrame(self: Sender, frame: WritableFrame) Error!void {
         try checkCode(c.nozzle_sender_commit_frame(self.raw, frame.raw));
+    }
+
+    pub fn publishTexture(self: Sender, texture: Texture) Error!void {
+        try checkCode(c.nozzle_sender_publish_texture(self.raw, texture.raw));
+    }
+
+    pub fn publishNativeTexture(self: Sender, native_texture: ?*anyopaque, width: u32, height: u32, format: TextureFormat) Error!void {
+        try checkCode(c.nozzle_sender_publish_native_texture(self.raw, native_texture, width, height, @intFromEnum(format)));
     }
 
     pub fn publishGLTexture(self: Sender, gl_name: u32, gl_target: u32, width: u32, height: u32, format: TextureFormat) Error!void {
@@ -268,7 +334,8 @@ pub const Receiver = struct {
     }
 
     pub fn isConnected(self: Receiver) bool {
-        return self.connectedInfo() catch return false;
+        _ = self.connectedInfo() catch return false;
+        return true;
     }
 };
 
@@ -292,30 +359,34 @@ pub const Frame = struct {
         };
     }
 
+    pub fn resolvedFormat(self: Frame) Error!ResolvedTextureFormat {
+        var raw: c.NozzleResolvedTextureFormat = undefined;
+        try checkCode(c.nozzle_frame_get_resolved_format(self.raw, &raw));
+        return ResolvedTextureFormat{
+            .storage_format = @enumFromInt(raw.storage_format),
+            .semantic_format = @enumFromInt(raw.semantic_format),
+            .format_source = @enumFromInt(raw.format_source),
+            .native_backend = @enumFromInt(raw.native_backend),
+            .native_kind = @enumFromInt(raw.native_kind),
+            .native_value = raw.native_value,
+            .channel_order = raw.channel_order,
+            .component_type = raw.component_type,
+            .component_bits = raw.component_bits,
+            .channel_count = raw.channel_count,
+            .bytes_per_pixel = raw.bytes_per_pixel,
+        };
+    }
+
     pub fn lockPixels(self: Frame, origin: TextureOrigin) Error!MappedPixels {
         var mapped: c.NozzleMappedPixels = undefined;
         try checkCode(c.nozzle_frame_lock_pixels_with_origin(self.raw, @intFromEnum(origin), &mapped));
-        return MappedPixels{
-            .data = @ptrCast(@alignCast(mapped.data)),
-            .row_stride_bytes = mapped.row_stride_bytes,
-            .width = mapped.width,
-            .height = mapped.height,
-            .format = @enumFromInt(mapped.format),
-            .origin = @enumFromInt(mapped.origin),
-        };
+        return mappedPixelsFromC(mapped);
     }
 
     pub fn lockWritablePixels(self: Frame, origin: TextureOrigin) Error!MappedPixels {
         var mapped: c.NozzleMappedPixels = undefined;
         try checkCode(c.nozzle_frame_lock_writable_pixels_with_origin(self.raw, @intFromEnum(origin), &mapped));
-        return MappedPixels{
-            .data = @ptrCast(@alignCast(mapped.data)),
-            .row_stride_bytes = mapped.row_stride_bytes,
-            .width = mapped.width,
-            .height = mapped.height,
-            .format = @enumFromInt(mapped.format),
-            .origin = @enumFromInt(mapped.origin),
-        };
+        return mappedPixelsFromC(mapped);
     }
 
     pub fn unlockPixels(self: Frame) void {
@@ -324,6 +395,10 @@ pub const Frame = struct {
 
     pub fn unlockWritablePixels(self: Frame) void {
         c.nozzle_frame_unlock_writable_pixels(self.raw);
+    }
+
+    pub fn copyToNativeTexture(self: Frame, native_texture: ?*anyopaque, width: u32, height: u32, format: TextureFormat) Error!void {
+        try checkCode(c.nozzle_frame_copy_to_native_texture(self.raw, native_texture, width, height, @intFromEnum(format)));
     }
 
     pub fn copyToGLTexture(self: Frame, gl_name: u32, gl_target: u32, width: u32, height: u32, format: TextureFormat) Error!void {
@@ -347,23 +422,37 @@ pub const WritableFrame = struct {
         };
     }
 
+    pub fn lockPixels(self: WritableFrame, origin: TextureOrigin) Error!MappedPixels {
+        var mapped: c.NozzleMappedPixels = undefined;
+        try checkCode(c.nozzle_frame_lock_pixels_with_origin(self.raw, @intFromEnum(origin), &mapped));
+        return mappedPixelsFromC(mapped);
+    }
+
     pub fn lockWritablePixels(self: WritableFrame, origin: TextureOrigin) Error!MappedPixels {
         var mapped: c.NozzleMappedPixels = undefined;
         try checkCode(c.nozzle_frame_lock_writable_pixels_with_origin(self.raw, @intFromEnum(origin), &mapped));
-        return MappedPixels{
-            .data = @ptrCast(@alignCast(mapped.data)),
-            .row_stride_bytes = mapped.row_stride_bytes,
-            .width = mapped.width,
-            .height = mapped.height,
-            .format = @enumFromInt(mapped.format),
-            .origin = @enumFromInt(mapped.origin),
-        };
+        return mappedPixelsFromC(mapped);
+    }
+
+    pub fn unlockPixels(self: WritableFrame) void {
+        c.nozzle_frame_unlock_pixels(self.raw);
     }
 
     pub fn unlockWritablePixels(self: WritableFrame) void {
         c.nozzle_frame_unlock_writable_pixels(self.raw);
     }
 };
+
+fn mappedPixelsFromC(mapped: c.NozzleMappedPixels) MappedPixels {
+    return .{
+        .data = @ptrCast(@alignCast(mapped.data)),
+        .row_stride_bytes = @intCast(mapped.row_stride_bytes),
+        .width = mapped.width,
+        .height = mapped.height,
+        .format = @enumFromInt(mapped.format),
+        .origin = @enumFromInt(mapped.origin),
+    };
+}
 
 pub fn enumerateSenders() Error!u32 {
     var array: c.NozzleSenderInfoArray = undefined;
@@ -375,7 +464,6 @@ pub fn enumerateSenders() Error!u32 {
     return count;
 }
 
-// testing helpers
 pub fn getDefaultDevice() Error!?*c.NozzleDevice {
     var device: ?*c.NozzleDevice = null;
     try checkCode(c.nozzle_device_get_default(&device));
@@ -384,4 +472,16 @@ pub fn getDefaultDevice() Error!?*c.NozzleDevice {
 
 pub fn destroyDevice(device: *c.NozzleDevice) void {
     c.nozzle_device_destroy(device);
+}
+
+pub fn swizzleChannels(src: []const u8, dst: []u8, width: u32, height: u32, src_row_bytes: u32, dst_row_bytes: u32, format: TextureFormat, permute_map: [4]u8) Error!void {
+    try checkCode(c.nozzle_swizzle_channels(src.ptr, dst.ptr, width, height, src_row_bytes, dst_row_bytes, @intFromEnum(format), &permute_map));
+}
+
+pub fn widenUint16ToUint32(src: []const u8, dst: []u8, width: u32, height: u32, src_row_bytes: u32, dst_row_bytes: u32, channels: u32) Error!void {
+    try checkCode(c.nozzle_widen_uint16_to_uint32(src.ptr, dst.ptr, width, height, src_row_bytes, dst_row_bytes, channels));
+}
+
+pub fn convertUint32ToFloat32(src: []const u8, dst: []u8, width: u32, height: u32, src_row_bytes: u32, dst_row_bytes: u32, channels: u32) Error!void {
+    try checkCode(c.nozzle_convert_uint32_to_float32(src.ptr, dst.ptr, width, height, src_row_bytes, dst_row_bytes, channels));
 }
