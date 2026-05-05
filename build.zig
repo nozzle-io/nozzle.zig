@@ -93,7 +93,7 @@ fn buildNozzle(
             },
             .frameworks = &.{},
             .system_libs = &.{ "d3d11", "dxgi", "opengl32", "bcrypt" },
-            .link_libcpp = false,
+            .link_libcpp = true,
         },
         .linux => PlatformConfig{
             .defines = &.{ "-DNOZZLE_PLATFORM_LINUX=1", "-DNOZZLE_HAS_DMA_BUF=1", "-DNOZZLE_HAS_OPENGL=1" },
