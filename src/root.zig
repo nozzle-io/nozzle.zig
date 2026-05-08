@@ -128,6 +128,8 @@ pub const SenderDesc = struct {
     application_name: [:0]const u8,
     ring_buffer_size: u32 = 3,
     allow_format_fallback: bool = true,
+    fallback_flags: u32 = 3,
+    fallback_flags_valid: bool = true,
 };
 
 pub const ReceiverDesc = struct {
@@ -245,7 +247,8 @@ pub const Sender = struct {
             .name = desc.name.ptr,
             .application_name = desc.application_name.ptr,
             .ring_buffer_size = desc.ring_buffer_size,
-            .allow_format_fallback = if (desc.allow_format_fallback) 1 else 0,
+            .fallback_flags = desc.fallback_flags,
+            .fallback_flags_valid = if (desc.fallback_flags_valid) 1 else 0,
         };
         try checkCode(c.nozzle_sender_create(&c_desc, &raw));
         return Sender{ .raw = raw.? };

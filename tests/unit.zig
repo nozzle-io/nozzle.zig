@@ -135,6 +135,8 @@ test "sender desc defaults" {
     };
     try std.testing.expectEqual(@as(u32, 3), desc.ring_buffer_size);
     try std.testing.expectEqual(true, desc.allow_format_fallback);
+    try std.testing.expectEqual(@as(u32, 3), desc.fallback_flags);
+    try std.testing.expectEqual(true, desc.fallback_flags_valid);
 }
 
 test "receiver desc defaults" {
