@@ -148,6 +148,7 @@ fn buildNozzle(
         nozzle_dir ++ "/src/common/channel_swizzle.cpp",
         nozzle_dir ++ "/src/common/format_convert.cpp",
         nozzle_dir ++ "/src/common/format_convert_sse2.cpp",
+        nozzle_dir ++ "/src/common/format_convert_f16c.cpp",
         nozzle_dir ++ "/src/common/format_convert_neon.cpp",
         nozzle_dir ++ "/src/common/format_resolve.cpp",
         nozzle_dir ++ "/src/c_api/nozzle_c.cpp",

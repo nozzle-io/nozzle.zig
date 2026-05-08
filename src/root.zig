@@ -157,6 +157,7 @@ pub const ConnectedSenderInfo = struct {
     width: u32,
     height: u32,
     format: TextureFormat,
+    semantic_format: TextureFormat,
     estimated_fps: f64,
     frame_counter: u64,
     last_update_time_ns: u64,
@@ -168,6 +169,7 @@ pub const FrameInfo = struct {
     width: u32,
     height: u32,
     format: TextureFormat,
+    semantic_format: TextureFormat,
     dropped_frame_count: u32,
 };
 
@@ -330,6 +332,7 @@ pub const Receiver = struct {
             .width = raw_info.width,
             .height = raw_info.height,
             .format = @enumFromInt(raw_info.format),
+            .semantic_format = @enumFromInt(raw_info.semantic_format),
             .estimated_fps = raw_info.estimated_fps,
             .frame_counter = raw_info.frame_counter,
             .last_update_time_ns = raw_info.last_update_time_ns,
@@ -358,6 +361,7 @@ pub const Frame = struct {
             .width = raw_info.width,
             .height = raw_info.height,
             .format = @enumFromInt(raw_info.format),
+            .semantic_format = @enumFromInt(raw_info.semantic_format),
             .dropped_frame_count = raw_info.dropped_frame_count,
         };
     }
@@ -421,6 +425,7 @@ pub const WritableFrame = struct {
             .width = raw_info.width,
             .height = raw_info.height,
             .format = @enumFromInt(raw_info.format),
+            .semantic_format = @enumFromInt(raw_info.semantic_format),
             .dropped_frame_count = raw_info.dropped_frame_count,
         };
     }
