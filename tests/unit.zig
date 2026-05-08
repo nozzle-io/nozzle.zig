@@ -201,6 +201,36 @@ test "mapped pixels totalBytes and asSlice" {
     try std.testing.expectEqual(@as(usize, 128), slice.len);
 }
 
+test "FrameInfo has semantic_format field" {
+    const info = nozzle.FrameInfo{
+        .frame_index = 1,
+        .timestamp_ns = 100,
+        .width = 640,
+        .height = 480,
+        .format = .rgba8_unorm,
+        .semantic_format = .rgba8_unorm,
+        .dropped_frame_count = 0,
+    };
+    try std.testing.expectEqual(nozzle.TextureFormat.rgba8_unorm, info.semantic_format);
+}
+
+test "ConnectedSenderInfo has semantic_format field" {
+    const info = nozzle.ConnectedSenderInfo{
+        .name = "test-sender",
+        .application_name = "test-app",
+        .id = "test-id",
+        .backend = .metal,
+        .width = 1920,
+        .height = 1080,
+        .format = .bgra8_unorm,
+        .semantic_format = .bgra8_unorm,
+        .estimated_fps = 60.0,
+        .frame_counter = 42,
+        .last_update_time_ns = 0,
+    };
+    try std.testing.expectEqual(nozzle.TextureFormat.bgra8_unorm, info.semantic_format);
+}
+
 // ============================================================================
 // GPU-dependent tests (require a running GPU backend)
 // These tests will be skipped on CI without GPU
