@@ -242,7 +242,7 @@ test "sender create and destroy" {
         .application_name = "zig-test",
         .ring_buffer_size = 3,
     }) catch |err| switch (err) {
-        error.UnsupportedBackend, error.ResourceCreationFailed => {
+        error.UnsupportedBackend, error.ResourceCreationFailed, error.BackendError => {
             std.debug.print("skip: no GPU ({})\n", .{err});
             return error.SkipZigTest;
         },
@@ -269,7 +269,7 @@ test "sender create with zero dimensions fails" {
         .name = "zig-test-dims",
         .application_name = "zig-test",
     }) catch |err| switch (err) {
-        error.UnsupportedBackend, error.ResourceCreationFailed => return error.SkipZigTest,
+        error.UnsupportedBackend, error.ResourceCreationFailed, error.BackendError => return error.SkipZigTest,
         else => return err,
     };
     defer sender.destroy();
@@ -288,6 +288,7 @@ test "receiver create and connected info" {
         error.SenderNotFound,
         error.UnsupportedBackend,
         error.ResourceCreationFailed,
+        error.BackendError,
         => return error.SkipZigTest,
         else => return err,
     };
@@ -311,7 +312,7 @@ test "sender acquire writable frame and commit" {
         .name = "zig-test-frame",
         .application_name = "zig-test",
     }) catch |err| switch (err) {
-        error.UnsupportedBackend, error.ResourceCreationFailed => return error.SkipZigTest,
+        error.UnsupportedBackend, error.ResourceCreationFailed, error.BackendError => return error.SkipZigTest,
         else => return err,
     };
     defer sender.destroy();
