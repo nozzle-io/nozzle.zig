@@ -16,6 +16,7 @@ pub const Error = error{
     SenderClosed,
     Timeout,
     BackendError,
+    CommandFailed,
 };
 
 pub fn checkCode(code: c.NozzleErrorCode) Error!void {
@@ -32,6 +33,7 @@ pub fn checkCode(code: c.NozzleErrorCode) Error!void {
         c.NOZZLE_ERROR_SENDER_CLOSED => return Error.SenderClosed,
         c.NOZZLE_ERROR_TIMEOUT => return Error.Timeout,
         c.NOZZLE_ERROR_BACKEND_ERROR => return Error.BackendError,
+        c.NOZZLE_ERROR_COMMAND_FAILED => return Error.CommandFailed,
         else => return Error.Unknown,
     }
 }
