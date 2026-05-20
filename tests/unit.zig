@@ -8,12 +8,12 @@ const nozzle = @import("nozzle");
 test "texture format bytes_per_pixel covers all variants" {
     // Every non-unknown format must return a non-null value
     const formats = [_]nozzle.TextureFormat{
-        .r8_unorm,     .rg8_unorm,     .rgba8_unorm,
-        .bgra8_unorm,  .rgba8_srgb,    .bgra8_srgb,
-        .r16_unorm,    .rg16_unorm,    .rgba16_unorm,
-        .r16_float,    .rg16_float,    .rgba16_float,
-        .r32_float,    .rg32_float,    .rgba32_float,
-        .r32_uint,     .rgba32_uint,   .depth32_float,
+        .r8_unorm,    .rg8_unorm,   .rgba8_unorm,
+        .bgra8_unorm, .rgba8_srgb,  .bgra8_srgb,
+        .r16_unorm,   .rg16_unorm,  .rgba16_unorm,
+        .r16_float,   .rg16_float,  .rgba16_float,
+        .r32_float,   .rg32_float,  .rgba32_float,
+        .r32_uint,    .rgba32_uint, .depth32_float,
     };
     for (formats) |fmt| {
         const bpp = fmt.bytesPerPixel();
@@ -331,7 +331,7 @@ test "sender acquire writable frame and commit" {
 
     // write pixels and verify
     const pixels = try frame.lockWritablePixels(.top_left);
-    defer frame.unlockWritablePixels();
+    errdefer frame.unlockWritablePixels();
 
     try std.testing.expectEqual(@as(u32, 64), pixels.width);
     try std.testing.expectEqual(@as(u32, 64), pixels.height);
@@ -342,6 +342,7 @@ test "sender acquire writable frame and commit" {
     @memset(row0, 0xAB);
     try std.testing.expectEqual(@as(u8, 0xAB), row0[0]);
     try std.testing.expectEqual(@as(u8, 0xAB), row0[63 * 4 + 3]);
+    frame.unlockWritablePixels();
 
     try sender.commitFrame(frame);
 }
