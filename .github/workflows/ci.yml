@@ -17,6 +17,9 @@ jobs:
         os: [macos-latest, windows-latest, ubuntu-latest]
       fail-fast: false
     runs-on: ${{ matrix.os }}
+    env:
+      ZIG_GLOBAL_CACHE_DIR: ${{ github.workspace }}/.zig-global-cache
+      ZIG_LOCAL_CACHE_DIR: ${{ github.workspace }}/.zig-local-cache
 
     steps:
       - uses: actions/checkout@v4
