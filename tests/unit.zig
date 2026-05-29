@@ -231,6 +231,28 @@ test "ConnectedSenderInfo has semantic_format field" {
     try std.testing.expectEqual(nozzle.TextureFormat.bgra8_unorm, info.semantic_format);
 }
 
+test "mapped pixels row supports negative stride" {
+    var buf: [32]u8 = undefined;
+    for (&buf, 0..) |*b, i| {
+        b.* = @intCast(i);
+    }
+
+    const mp = nozzle.MappedPixels{
+        .data = &buf,
+        .row_stride_bytes = -8,
+        .width = 8,
+        .height = 4,
+        .format = .r8_unorm,
+        .origin = .bottom_left,
+    };
+
+    const row0 = mp.row(0).?;
+    const row3 = mp.row(3).?;
+    try std.testing.expectEqual(@as(usize, 8), row0.len);
+    try std.testing.expectEqual(@as(u8, 24), row0[0]);
+    try std.testing.expectEqual(@as(u8, 0), row3[0]);
+}
+
 // ============================================================================
 // GPU-dependent tests (require a running GPU backend)
 // These tests will be skipped on CI without GPU
@@ -331,18 +353,21 @@ test "sender acquire writable frame and commit" {
 
     // write pixels and verify
     const pixels = try frame.lockWritablePixels(.top_left);
-    errdefer frame.unlockWritablePixels();
+    var pixels_locked = true;
+    errdefer if (pixels_locked) frame.unlockWritablePixels();
 
     try std.testing.expectEqual(@as(u32, 64), pixels.width);
     try std.testing.expectEqual(@as(u32, 64), pixels.height);
-    try std.testing.expectEqual(@as(u64, 64 * 4), pixels.row_stride_bytes);
+    try std.testing.expectEqual(@as(i64, 64 * 4), pixels.row_stride_bytes);
 
     // write pattern and verify
     const row0 = pixels.row(0).?;
     @memset(row0, 0xAB);
     try std.testing.expectEqual(@as(u8, 0xAB), row0[0]);
     try std.testing.expectEqual(@as(u8, 0xAB), row0[63 * 4 + 3]);
-    frame.unlockWritablePixels();
+    try frame.unlockWritablePixelsChecked();
+    pixels_locked = false;
+    try std.testing.expectError(error.InvalidArgument, frame.unlockWritablePixelsChecked());
 
     try sender.commitFrame(frame);
 }

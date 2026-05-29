@@ -191,7 +191,7 @@ pub const ResolvedTextureFormat = struct {
 
 pub const MappedPixels = struct {
     data: [*]u8,
-    row_stride_bytes: u64,
+    row_stride_bytes: i64,
     width: u32,
     height: u32,
     format: TextureFormat,
@@ -199,13 +199,16 @@ pub const MappedPixels = struct {
 
     pub fn row(self: MappedPixels, y: u32) ?[]u8 {
         if (y >= self.height) return null;
-        const start = @as(usize, y) * @as(usize, self.row_stride_bytes);
-        const end = start + @as(usize, self.row_stride_bytes);
+        const abs_stride: usize = @intCast(if (self.row_stride_bytes < 0) -self.row_stride_bytes else self.row_stride_bytes);
+        const row_index = if (self.row_stride_bytes < 0) self.height - 1 - y else y;
+        const start = @as(usize, row_index) * abs_stride;
+        const end = start + abs_stride;
         return self.data[start..end];
     }
 
     pub fn totalBytes(self: MappedPixels) usize {
-        return @as(usize, self.height) * @as(usize, self.row_stride_bytes);
+        const abs_stride: usize = @intCast(if (self.row_stride_bytes < 0) -self.row_stride_bytes else self.row_stride_bytes);
+        return @as(usize, self.height) * abs_stride;
     }
 
     pub fn asSlice(self: MappedPixels) []u8 {
@@ -406,6 +409,10 @@ pub const Frame = struct {
         c.nozzle_frame_unlock_writable_pixels(self.raw);
     }
 
+    pub fn unlockWritablePixelsChecked(self: Frame) Error!void {
+        try checkCode(c.nozzle_frame_unlock_writable_pixels_checked(self.raw));
+    }
+
     pub fn copyToNativeTexture(self: Frame, native_texture: ?*anyopaque, width: u32, height: u32, format: TextureFormat) Error!void {
         try checkCode(c.nozzle_frame_copy_to_native_texture(self.raw, native_texture, width, height, @intFromEnum(format)));
     }
@@ -450,6 +457,10 @@ pub const WritableFrame = struct {
 
     pub fn unlockWritablePixels(self: WritableFrame) void {
         c.nozzle_frame_unlock_writable_pixels(self.raw);
+    }
+
+    pub fn unlockWritablePixelsChecked(self: WritableFrame) Error!void {
+        try checkCode(c.nozzle_frame_unlock_writable_pixels_checked(self.raw));
     }
 };
 
