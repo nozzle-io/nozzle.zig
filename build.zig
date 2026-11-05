@@ -51,11 +51,27 @@ pub fn build(b: *std.Build) void {
 
 const PlatformConfig = struct {
     defines: []const []const u8,
-    platform_sources: []const []const u8,
+    source_lists: []const []const u8,
     frameworks: []const []const u8,
     system_libs: []const []const u8,
     link_libcpp: bool,
 };
+
+fn readSourceList(b: *std.Build, nozzle_dir: []const u8, group: []const u8) []const []const u8 {
+    const list_path = b.fmt("{s}/sources/{s}.txt", .{ nozzle_dir, group });
+    const contents = b.build_root.handle.readFileAlloc(b.allocator, list_path, 64 * 1024) catch |err| {
+        std.debug.panic("could not read {s}: {s}", .{ list_path, @errorName(err) });
+    };
+    var files = std.ArrayList([]const u8).init(b.allocator);
+    var lines = std.mem.tokenizeAny(u8, contents, "\r\n");
+    while (lines.next()) |line| {
+        files.append(b.fmt("{s}/{s}", .{ nozzle_dir, line })) catch @panic("OOM");
+    }
+    if (files.items.len == 0) {
+        std.debug.panic("{s} is empty", .{list_path});
+    }
+    return files.items;
+}
 
 fn buildNozzle(
     b: *std.Build,
@@ -70,44 +86,28 @@ fn buildNozzle(
     const platform = switch (os_tag) {
         .macos => PlatformConfig{
             .defines = &.{ "-DNOZZLE_PLATFORM_MACOS=1", "-DNOZZLE_HAS_METAL=1", "-DNOZZLE_HAS_OPENGL=1" },
-            .platform_sources = &.{
-                nozzle_dir ++ "/src/backends/metal/metal_backend.mm",
-                nozzle_dir ++ "/src/backends/metal/metal_texture.mm",
-                nozzle_dir ++ "/src/backends/metal/metal_channel_swap.mm",
-                nozzle_dir ++ "/src/backends/metal/metal_sync.mm",
-                nozzle_dir ++ "/src/common/channel_swizzle_vimage.cpp",
-                nozzle_dir ++ "/src/common/format_convert_vimage.cpp",
-                nozzle_dir ++ "/src/backends/opengl/opengl_backend.cpp",
-            },
+            .source_lists = &.{ "macos", "opengl" },
             .frameworks = &.{ "Metal", "IOSurface", "Foundation", "Accelerate", "OpenGL" },
             .system_libs = &.{},
             .link_libcpp = true,
         },
         .windows => PlatformConfig{
             .defines = &.{ "-DNOZZLE_PLATFORM_WINDOWS=1", "-DNOZZLE_HAS_D3D11=1", "-DNOZZLE_HAS_OPENGL=1" },
-            .platform_sources = &.{
-                nozzle_dir ++ "/src/backends/d3d11/d3d11_backend.cpp",
-                nozzle_dir ++ "/src/backends/d3d11/d3d11_texture.cpp",
-                nozzle_dir ++ "/src/backends/d3d11/d3d11_sync.cpp",
-                nozzle_dir ++ "/src/backends/opengl/opengl_backend.cpp",
-            },
+            .source_lists = &.{ "windows", "opengl" },
             .frameworks = &.{},
             .system_libs = &.{ "d3d11", "dxgi", "opengl32", "bcrypt" },
             .link_libcpp = true,
         },
         .linux => PlatformConfig{
             .defines = &.{ "-DNOZZLE_PLATFORM_LINUX=1", "-DNOZZLE_HAS_DMA_BUF=1", "-DNOZZLE_HAS_OPENGL=1" },
-            .platform_sources = &.{
-                nozzle_dir ++ "/src/backends/linux/linux_texture.cpp",
-                nozzle_dir ++ "/src/backends/opengl/opengl_backend.cpp",
-            },
+            .source_lists = &.{ "linux", "opengl" },
             .frameworks = &.{},
             .system_libs = &.{ "drm", "gbm", "EGL", "GL" },
             .link_libcpp = true,
         },
         else => PlatformConfig{
             .defines = &.{},
-            .platform_sources = &.{},
+            .source_lists = &.{},
             .frameworks = &.{},
             .system_libs = &.{},
             .link_libcpp = true,
@@ -134,40 +134,19 @@ fn buildNozzle(
         "-fno-rtti",
     };
 
-    const common_files = &[_][]const u8{
-        nozzle_dir ++ "/src/common/ipc.cpp",
-        nozzle_dir ++ "/src/common/registry.cpp",
-        nozzle_dir ++ "/src/common/sender.cpp",
-        nozzle_dir ++ "/src/common/receiver.cpp",
-        nozzle_dir ++ "/src/common/frame.cpp",
-        nozzle_dir ++ "/src/common/texture.cpp",
-        nozzle_dir ++ "/src/common/device.cpp",
-        nozzle_dir ++ "/src/common/discovery.cpp",
-        nozzle_dir ++ "/src/common/metadata.cpp",
-        nozzle_dir ++ "/src/common/pixel_access.cpp",
-        nozzle_dir ++ "/src/common/channel_swizzle.cpp",
-        nozzle_dir ++ "/src/common/format_convert.cpp",
-        nozzle_dir ++ "/src/common/format_convert_sse2.cpp",
-        nozzle_dir ++ "/src/common/format_convert_f16c.cpp",
-        nozzle_dir ++ "/src/common/format_convert_neon.cpp",
-        nozzle_dir ++ "/src/common/format_resolve.cpp",
-        nozzle_dir ++ "/src/common/backend_capabilities.cpp",
-        nozzle_dir ++ "/src/c_api/nozzle_c.cpp",
-    };
-
     // combine base_flags + platform defines into a single flags array
     var all_flags = std.ArrayList([]const u8).initCapacity(b.allocator, base_flags.len + platform.defines.len) catch unreachable;
     all_flags.appendSliceAssumeCapacity(base_flags);
     all_flags.appendSliceAssumeCapacity(platform.defines);
 
     lib_mod.addCSourceFiles(.{
-        .files = common_files,
+        .files = readSourceList(b, nozzle_dir, "common"),
         .flags = all_flags.items,
     });
 
-    if (platform.platform_sources.len > 0) {
+    for (platform.source_lists) |group| {
         lib_mod.addCSourceFiles(.{
-            .files = platform.platform_sources,
+            .files = readSourceList(b, nozzle_dir, group),
             .flags = all_flags.items,
         });
     }
