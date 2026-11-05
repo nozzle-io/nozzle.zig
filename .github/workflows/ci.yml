@@ -35,8 +35,34 @@ jobs:
         with:
           version: 0.14.0
 
+      - name: Record macOS toolchain provenance
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          sw_vers
+          uname -m
+          xcode-select -p
+          xcodebuild -version
+          sdk_path="$(xcrun --sdk macosx --show-sdk-path)"
+          printf 'macOS SDK path: %s\n' "$sdk_path"
+          xcrun --sdk macosx --show-sdk-version
+          zig version
+          zig env
+
+      - name: Verify Zig host build runner
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          diagnostic_dir="$(mktemp -d)"
+          mkdir -p "$diagnostic_dir/global-cache" "$diagnostic_dir/local-cache"
+          printf '%s\n' 'pub fn build(_: *@import("std").Build) void {}' > "$diagnostic_dir/build.zig"
+          env \
+            ZIG_GLOBAL_CACHE_DIR="$diagnostic_dir/global-cache" \
+            ZIG_LOCAL_CACHE_DIR="$diagnostic_dir/local-cache" \
+            zig build --build-file "$diagnostic_dir/build.zig" --verbose-link
+
       - name: Build
-        run: zig build
+        run: zig build --verbose-link
 
       - name: Test
-        run: zig build test
+        run: zig build test --verbose-link
