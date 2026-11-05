@@ -135,6 +135,7 @@ const frame = nozzle.Sender.acquireWritableFrame(0, 0, .unknown) catch |err| {
 ## Platform Notes
 
 - **macOS**: Links Metal, IOSurface, Foundation, Accelerate, OpenGL frameworks automatically
+  - CI uses the `macos-15` runner and records its selected Xcode and SDK. Zig 0.14.0 cannot link its host build runner on the macOS 26 image; this fails before nozzle targets are built.
 - **Windows**: Links d3d11, dxgi, opengl32, bcrypt automatically
 - **Linux**: Links drm, gbm, EGL, GL automatically
 
