@@ -14,7 +14,9 @@ jobs:
   build:
     strategy:
       matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest]
+        # Zig 0.14.0 cannot link its host build runner on the macOS 26 image.
+        # Use the supported macOS 15 image and record its selected Xcode/SDK below.
+        os: [macos-15, windows-latest, ubuntu-latest]
       fail-fast: false
     runs-on: ${{ matrix.os }}
     env:
