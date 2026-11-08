@@ -1,5 +1,6 @@
 const std = @import("std");
 const nozzle = @import("nozzle");
+const builtin = @import("builtin");
 
 // ============================================================================
 // Pure Zig logic tests (no GPU required, always run)
@@ -257,6 +258,51 @@ test "mapped pixels row supports negative stride" {
 // GPU-dependent tests (require a running GPU backend)
 // These tests will be skipped on CI without GPU
 // ============================================================================
+
+test "required native metadata retains identity after SenderClosed but is disconnected" {
+    if (builtin.os.tag != .macos and builtin.os.tag != .windows) {
+        std.debug.print("SKIP: native metadata lifecycle requires macOS/Windows\n", .{});
+        return error.SkipZigTest;
+    }
+    var name_buffer: [nozzle.c.NOZZLE_SENDER_NAME_CAPACITY]u8 = undefined;
+    const name = try std.fmt.bufPrintZ(&name_buffer, "z193-{d}-\u{65e5}\u{1f680}", .{std.time.nanoTimestamp()});
+    const application = "\u{65e5}\u{672c}-app-\u{1f680}";
+    const sender = try nozzle.Sender.create(.{ .name = name, .application_name = application });
+    var sender_open = true;
+    defer if (sender_open) sender.destroy();
+    const receiver = try nozzle.Receiver.create(.{ .name = name, .application_name = application });
+    defer receiver.destroy();
+    const own = try sender.info();
+    const before = try receiver.connectedInfo();
+    const backend: nozzle.BackendType = if (builtin.os.tag == .macos) .metal else .d3d11;
+    try std.testing.expectEqual(backend, own.backend);
+    try std.testing.expectEqual(backend, before.backend);
+    try std.testing.expectEqualStrings(name, before.name);
+    try std.testing.expectEqualStrings(application, before.application_name);
+    try std.testing.expectEqualStrings(own.id, before.id);
+    try std.testing.expectEqual(@as(usize, 36), own.id.len);
+    var retained_id: [36]u8 = undefined;
+    @memcpy(&retained_id, own.id);
+    try std.testing.expect(receiver.isConnected());
+
+    // No frame/mapping retains the sender; copy the borrowed ID before destroy.
+    sender.destroy();
+    sender_open = false;
+    if (receiver.acquireFrame(.{})) |unexpected| {
+        unexpected.release();
+        return error.ExpectedSenderClosed;
+    } else |err| {
+        try std.testing.expectEqual(error.SenderClosed, err);
+    }
+    const after = try receiver.connectedInfo();
+    try std.testing.expectEqualStrings(name, after.name);
+    try std.testing.expectEqualStrings(application, after.application_name);
+    try std.testing.expectEqualStrings(&retained_id, after.id);
+    try std.testing.expectEqual(backend, after.backend);
+    const connected = receiver.isConnected();
+    std.debug.print("METADATA_NATIVE SenderClosed retained_id={s} connected={}\n", .{ retained_id, connected });
+    try std.testing.expect(!connected);
+}
 
 test "sender create and destroy" {
     const sender = nozzle.Sender.create(.{
