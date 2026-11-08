@@ -145,16 +145,28 @@ pub const AcquireDesc = struct {
 };
 
 pub const SenderInfo = struct {
-    name: [:0]const u8,
-    application_name: [:0]const u8,
-    id: [:0]const u8,
+    name_storage: [c.NOZZLE_SENDER_NAME_CAPACITY]u8 = [_]u8{0} ** c.NOZZLE_SENDER_NAME_CAPACITY,
+    application_name_storage: [c.NOZZLE_APPLICATION_NAME_CAPACITY]u8 = [_]u8{0} ** c.NOZZLE_APPLICATION_NAME_CAPACITY,
+    id_storage: [c.NOZZLE_SENDER_ID_CAPACITY]u8 = [_]u8{0} ** c.NOZZLE_SENDER_ID_CAPACITY,
     backend: BackendType,
+
+    pub fn name(self: *const SenderInfo) []const u8 {
+        return metadataString(&self.name_storage);
+    }
+
+    pub fn applicationName(self: *const SenderInfo) []const u8 {
+        return metadataString(&self.application_name_storage);
+    }
+
+    pub fn id(self: *const SenderInfo) []const u8 {
+        return metadataString(&self.id_storage);
+    }
 };
 
 pub const ConnectedSenderInfo = struct {
-    name: [:0]const u8,
-    application_name: [:0]const u8,
-    id: [:0]const u8,
+    name_storage: [c.NOZZLE_SENDER_NAME_CAPACITY]u8 = [_]u8{0} ** c.NOZZLE_SENDER_NAME_CAPACITY,
+    application_name_storage: [c.NOZZLE_APPLICATION_NAME_CAPACITY]u8 = [_]u8{0} ** c.NOZZLE_APPLICATION_NAME_CAPACITY,
+    id_storage: [c.NOZZLE_SENDER_ID_CAPACITY]u8 = [_]u8{0} ** c.NOZZLE_SENDER_ID_CAPACITY,
     backend: BackendType,
     width: u32,
     height: u32,
@@ -163,7 +175,29 @@ pub const ConnectedSenderInfo = struct {
     estimated_fps: f64,
     frame_counter: u64,
     last_update_time_ns: u64,
+
+    pub fn name(self: *const ConnectedSenderInfo) []const u8 {
+        return metadataString(&self.name_storage);
+    }
+
+    pub fn applicationName(self: *const ConnectedSenderInfo) []const u8 {
+        return metadataString(&self.application_name_storage);
+    }
+
+    pub fn id(self: *const ConnectedSenderInfo) []const u8 {
+        return metadataString(&self.id_storage);
+    }
 };
+
+pub const ConnectionSnapshot = struct {
+    connected: bool,
+    info: ConnectedSenderInfo,
+};
+
+// The slice borrows caller-owned storage; no pointer is stored in the value.
+fn metadataString(bytes: []const u8) []const u8 {
+    return bytes[0 .. std.mem.indexOfScalar(u8, bytes, 0) orelse bytes.len];
+}
 
 pub const FrameInfo = struct {
     frame_index: u64,
@@ -288,12 +322,12 @@ pub const Sender = struct {
     }
 
     pub fn info(self: Sender) Error!SenderInfo {
-        var raw_info: c.NozzleSenderInfo = undefined;
-        try checkCode(c.nozzle_sender_get_info(self.raw, &raw_info));
+        var raw_info: c.NozzleSenderInfoSnapshot = undefined;
+        try checkCode(c.nozzle_sender_get_info_snapshot(self.raw, &raw_info));
         return SenderInfo{
-            .name = std.mem.sliceTo(raw_info.name, 0),
-            .application_name = std.mem.sliceTo(raw_info.application_name, 0),
-            .id = std.mem.sliceTo(raw_info.id, 0),
+            .name_storage = raw_info.name,
+            .application_name_storage = raw_info.application_name,
+            .id_storage = raw_info.id,
             .backend = @enumFromInt(raw_info.backend),
         };
     }
@@ -327,26 +361,33 @@ pub const Receiver = struct {
     }
 
     pub fn connectedInfo(self: Receiver) Error!ConnectedSenderInfo {
-        var raw_info: c.NozzleConnectedSenderInfo = undefined;
-        try checkCode(c.nozzle_receiver_get_connected_info(self.raw, &raw_info));
-        return ConnectedSenderInfo{
-            .name = std.mem.sliceTo(raw_info.name, 0),
-            .application_name = std.mem.sliceTo(raw_info.application_name, 0),
-            .id = std.mem.sliceTo(raw_info.id, 0),
-            .backend = @enumFromInt(raw_info.backend),
-            .width = raw_info.width,
-            .height = raw_info.height,
-            .format = @enumFromInt(raw_info.format),
-            .semantic_format = @enumFromInt(raw_info.semantic_format),
-            .estimated_fps = raw_info.estimated_fps,
-            .frame_counter = raw_info.frame_counter,
-            .last_update_time_ns = raw_info.last_update_time_ns,
+        return (try self.connectionSnapshot()).info;
+    }
+
+    pub fn connectionSnapshot(self: Receiver) Error!ConnectionSnapshot {
+        var raw_info: c.NozzleConnectedSenderSnapshot = undefined;
+        try checkCode(c.nozzle_receiver_get_connected_info_snapshot(self.raw, &raw_info));
+        return ConnectionSnapshot{
+            .connected = raw_info.connected != 0,
+            .info = .{
+                .name_storage = raw_info.name,
+                .application_name_storage = raw_info.application_name,
+                .id_storage = raw_info.id,
+                .backend = @enumFromInt(raw_info.backend),
+                .width = raw_info.width,
+                .height = raw_info.height,
+                .format = @enumFromInt(raw_info.format),
+                .semantic_format = @enumFromInt(raw_info.semantic_format),
+                .estimated_fps = raw_info.estimated_fps,
+                .frame_counter = raw_info.frame_counter,
+                .last_update_time_ns = raw_info.last_update_time_ns,
+            },
         };
     }
 
     pub fn isConnected(self: Receiver) bool {
-        _ = self.connectedInfo() catch return false;
-        return true;
+        const snapshot = self.connectionSnapshot() catch return false;
+        return snapshot.connected;
     }
 };
 

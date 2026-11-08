@@ -1,5 +1,6 @@
 const std = @import("std");
 const nozzle = @import("nozzle");
+const builtin = @import("builtin");
 
 // ============================================================================
 // Pure Zig logic tests (no GPU required, always run)
@@ -216,9 +217,6 @@ test "FrameInfo has semantic_format field" {
 
 test "ConnectedSenderInfo has semantic_format field" {
     const info = nozzle.ConnectedSenderInfo{
-        .name = "test-sender",
-        .application_name = "test-app",
-        .id = "test-id",
         .backend = .metal,
         .width = 1920,
         .height = 1080,
@@ -229,6 +227,54 @@ test "ConnectedSenderInfo has semantic_format field" {
         .last_update_time_ns = 0,
     };
     try std.testing.expectEqual(nozzle.TextureFormat.bgra8_unorm, info.semantic_format);
+}
+
+test "owned metadata copies do not keep pointers into the original value" {
+    const identity = "\u{65e5}\u{672c}\u{1f680}";
+    var sender_info = nozzle.SenderInfo{ .backend = .metal };
+    @memcpy(sender_info.name_storage[0..identity.len], identity);
+    @memcpy(sender_info.application_name_storage[0..identity.len], identity);
+    @memcpy(sender_info.id_storage[0..7], "test-id");
+    const sender_copy = sender_info;
+    @memset(&sender_info.name_storage, 'x');
+    @memset(&sender_info.application_name_storage, 'y');
+    @memset(&sender_info.id_storage, 'z');
+    try std.testing.expectEqualStrings(identity, sender_copy.name());
+    try std.testing.expectEqualStrings(identity, sender_copy.applicationName());
+    try std.testing.expectEqualStrings("test-id", sender_copy.id());
+    // A missing NUL still cannot make an accessor read past its owned array.
+    try std.testing.expectEqual(sender_info.name_storage.len, sender_info.name().len);
+    try std.testing.expectEqual(sender_info.application_name_storage.len, sender_info.applicationName().len);
+    try std.testing.expectEqual(sender_info.id_storage.len, sender_info.id().len);
+
+    var info = nozzle.ConnectedSenderInfo{
+        .name_storage = sender_copy.name_storage,
+        .application_name_storage = sender_copy.application_name_storage,
+        .id_storage = sender_copy.id_storage,
+        .backend = .metal,
+        .width = 65,
+        .height = 3,
+        .format = .rgba8_unorm,
+        .semantic_format = .rgba8_srgb,
+        .estimated_fps = 29.97,
+        .frame_counter = 0x100000001,
+        .last_update_time_ns = 0x200000003,
+    };
+    const snapshot = nozzle.ConnectionSnapshot{ .connected = false, .info = info };
+    @memset(&info.name_storage, 'a');
+    @memset(&info.application_name_storage, 'b');
+    @memset(&info.id_storage, 'c');
+    try std.testing.expect(!snapshot.connected);
+    try std.testing.expectEqualStrings(identity, snapshot.info.name());
+    try std.testing.expectEqualStrings(identity, snapshot.info.applicationName());
+    try std.testing.expectEqualStrings("test-id", snapshot.info.id());
+    try std.testing.expectEqual(info.name_storage.len, info.name().len);
+    try std.testing.expectEqual(info.application_name_storage.len, info.applicationName().len);
+    try std.testing.expectEqual(info.id_storage.len, info.id().len);
+    try std.testing.expectEqual(nozzle.TextureFormat.rgba8_srgb, snapshot.info.semantic_format);
+    try std.testing.expectEqual(@as(f64, 29.97), snapshot.info.estimated_fps);
+    try std.testing.expectEqual(@as(u64, 0x100000001), snapshot.info.frame_counter);
+    try std.testing.expectEqual(@as(u64, 0x200000003), snapshot.info.last_update_time_ns);
 }
 
 test "mapped pixels row supports negative stride" {
@@ -255,8 +301,71 @@ test "mapped pixels row supports negative stride" {
 
 // ============================================================================
 // GPU-dependent tests (require a running GPU backend)
-// These tests will be skipped on CI without GPU
+// The required metadata case fails on macOS/Windows backend errors; legacy cases may skip.
 // ============================================================================
+
+test "required native metadata retains identity after SenderClosed but is disconnected" {
+    if (builtin.os.tag != .macos and builtin.os.tag != .windows) {
+        std.debug.print("SKIP: native metadata lifecycle requires macOS/Windows\n", .{});
+        return error.SkipZigTest;
+    }
+    var name_buffer: [nozzle.c.NOZZLE_SENDER_NAME_CAPACITY]u8 = undefined;
+    const name = try std.fmt.bufPrintZ(&name_buffer, "z193-{d}-\u{65e5}\u{1f680}", .{std.time.nanoTimestamp()});
+    const application = "\u{65e5}\u{672c}-app-\u{1f680}";
+    const sender = try nozzle.Sender.create(.{ .name = name, .application_name = application });
+    var sender_open = true;
+    defer if (sender_open) sender.destroy();
+    const receiver = try nozzle.Receiver.create(.{ .name = name, .application_name = application });
+    var receiver_open = true;
+    defer if (receiver_open) receiver.destroy();
+    const own = try sender.info();
+    const before = try receiver.connectedInfo();
+    const initial = try receiver.connectionSnapshot();
+    try std.testing.expect(initial.connected);
+    try std.testing.expectEqualDeep(before, initial.info);
+    const backend: nozzle.BackendType = if (builtin.os.tag == .macos) .metal else .d3d11;
+    try std.testing.expectEqual(backend, own.backend);
+    try std.testing.expectEqual(backend, before.backend);
+    try std.testing.expectEqualStrings(name, before.name());
+    try std.testing.expectEqualStrings(application, before.applicationName());
+    try std.testing.expectEqualStrings(own.id(), before.id());
+    try std.testing.expectEqual(@as(usize, 36), own.id().len);
+    var retained_id: [36]u8 = undefined;
+    @memcpy(&retained_id, own.id());
+    try std.testing.expect(receiver.isConnected());
+
+    // No frame/mapping retains the sender; the same lifecycle drives the red oracle.
+    sender.destroy();
+    sender_open = false;
+    if (receiver.acquireFrame(.{})) |unexpected| {
+        unexpected.release();
+        return error.ExpectedSenderClosed;
+    } else |err| {
+        try std.testing.expectEqual(error.SenderClosed, err);
+    }
+    const after = try receiver.connectedInfo();
+    try std.testing.expectEqualStrings(name, after.name());
+    try std.testing.expectEqualStrings(application, after.applicationName());
+    try std.testing.expectEqualStrings(&retained_id, after.id());
+    try std.testing.expectEqual(backend, after.backend);
+    const connected = receiver.isConnected();
+    std.debug.print("METADATA_NATIVE SenderClosed retained_id={s} connected={}\n", .{ retained_id, connected });
+    try std.testing.expect(!connected);
+    const disconnected = try receiver.connectionSnapshot();
+    try std.testing.expect(!disconnected.connected);
+    try std.testing.expectEqualDeep(after, disconnected.info);
+    receiver.destroy();
+    receiver_open = false;
+    try std.testing.expect(initial.connected);
+    try std.testing.expectEqualStrings(name, own.name());
+    try std.testing.expectEqualStrings(application, own.applicationName());
+    try std.testing.expectEqualStrings(&retained_id, own.id());
+    try std.testing.expectEqualDeep(before, initial.info);
+    try std.testing.expectEqualStrings(name, disconnected.info.name());
+    try std.testing.expectEqualStrings(application, disconnected.info.applicationName());
+    try std.testing.expectEqualStrings(&retained_id, disconnected.info.id());
+    std.debug.print("METADATA_NATIVE owned_UTF8_after_both_destroy\n", .{});
+}
 
 test "sender create and destroy" {
     const sender = nozzle.Sender.create(.{
@@ -273,8 +382,8 @@ test "sender create and destroy" {
     defer sender.destroy();
 
     const info = sender.info() catch unreachable;
-    try std.testing.expectEqualStrings("zig-test-sender", info.name);
-    try std.testing.expectEqualStrings("zig-test", info.application_name);
+    try std.testing.expectEqualStrings("zig-test-sender", info.name());
+    try std.testing.expectEqualStrings("zig-test", info.applicationName());
     try std.testing.expect(info.backend == .metal or info.backend == .d3d11 or info.backend == .opengl or info.backend == .dma_buf);
 }
 

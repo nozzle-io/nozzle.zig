@@ -97,6 +97,50 @@ const count = try nozzle.enumerateSenders();
 std.debug.print("found {} senders\n", .{count});
 ```
 
+## Owned Metadata and Source Migration
+
+`Sender.info()` and `Receiver.connectedInfo()` now return values owning fixed
+identity arrays sized by the C capacity constants. Copying these values copies
+their bytes, without an allocator or `deinit`. Complete C snapshot structs are
+used internally; discovery's enumeration/free path is unchanged.
+
+This is an intentional pre-stable source change: replace `info.name`,
+`info.application_name`, and `info.id` with `info.name()`,
+`info.applicationName()`, and `info.id()`. Scalar fields are unchanged. Manual
+struct literals use `name_storage`, `application_name_storage`, and `id_storage`
+arrays (zero-initialized by default), not string slices.
+
+```zig
+const snapshot = try receiver.connectionSnapshot();
+std.debug.print("connected={} sender={s}\n", .{
+    snapshot.connected, snapshot.info.name(),
+});
+const copy = snapshot;
+std.debug.print("copied sender={s}\n", .{copy.info.name()});
+```
+
+Accessors take a pointer to the caller-owned value and return capacity-bounded
+`[]const u8` slices, without including the NUL. Keep the named value alive and
+stable while using its slices. After copying/moving a value, obtain new slices
+from that copy; existing slices still refer to the original. Do not retain a
+slice from a temporary expression such as `(try sender.info()).name()`.
+
+`connectionSnapshot()` obtains `connected: bool` and `info: ConnectedSenderInfo`
+from one native call. `connectedInfo()` projects metadata; `isConnected()` reads
+the flag (false on errors). Metadata can remain available after an acquire has
+observed `SenderClosed`. The flag is last-observed state, not a fresh liveness
+check, and these APIs add neither automatic reconnect nor concurrent handle
+destruction safety. Snapshot exports from the pinned core are required; no
+borrowed-getter fallback remains.
+
+The required native metadata case fails on macOS/Windows setup errors, observes
+real `SenderClosed`, checks retained UTF-8 identity with `connected=false`, then
+reads owned values after both handles are destroyed. Linux explicitly excludes
+this default-backend lifecycle case. A separate portable value-copy test guards
+against self-referential storage and unbounded string access; its high counters
+and fractional FPS are constructed values, not native stream-statistic evidence.
+No new pixel, cross-process or concurrent-destruction claim is made.
+
 ## Error Handling
 
 All fallible operations return Zig error unions. C error codes map directly to Zig errors:

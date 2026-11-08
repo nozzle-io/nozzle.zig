@@ -11,8 +11,8 @@ pub fn main() !void {
 
     const info = try sender.info();
     std.debug.print("sender: {s} (id: {s}, backend: {})\n", .{
-        info.name,
-        info.id,
+        info.name(),
+        info.id(),
         info.backend,
     });
 
